@@ -1,0 +1,23 @@
+name: ml-project-gnn-llm
+channels:
+  - pytorch
+  - pyg
+  - nvidia
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pytorch
+  - torchvision
+  - torchaudio
+  - cudatoolkit=11.3
+  - pyg
+  - transformers
+  - datasets
+  - scikit-learn
+  - pandas
+  - jupyter
+  - notebook
+  - ipywidgets
+  - tqdm
+  - numpy
