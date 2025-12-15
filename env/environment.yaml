@@ -21,3 +21,12 @@ dependencies:
   - ipywidgets
   - tqdm
   - numpy
+  - matplotlib
+  - pyg-lib
+  - torch-sparse
+  - bitsandbytes
+  - sentence-transformers
+  - pip
+  - pip: 
+    - accelerate
+    - ogb

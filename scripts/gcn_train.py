@@ -1,25 +1,24 @@
 import sys, pathlib
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
-
 import argparse
+import sys
 
 import torch
-import torch.nn.functional as F
-from tqdm import tqdm
 import torch_geometric.transforms as T
 from torch_geometric.loader import NeighborLoader
 from ogb.nodeproppred import PygNodePropPredDataset
-from src.plot_utils import save_results, plot_loss_curve, plot_accuracy_curve
-from src.train_utils import train, eval
-import time
 
 from pathlib import Path
 
-from models import GIN
+from src.gcn_model import GCN
+from src.train_utils import train, eval
+from src.plot_utils import save_results, plot_loss_curve, plot_accuracy_curve
 
 # --- 训练与评估函数 ---
 
 DATA_ROOT = "./dataset"
+
+# --- 主函数 ---
 
 def main():
     parser = argparse.ArgumentParser(description='OGBN-Products GIN training')
@@ -29,7 +28,7 @@ def main():
     parser.add_argument('--hidden_channels', type=int, default=256, help='Number of hidden channels')
     parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
     parser.add_argument('--epochs', type=int, default=50, help='Number of epochs')
-    parser.add_argument('--batch_size', type=int, default=1024, help='Batch size for training')
+    parser.add_argument('--batch_size', type=int, default=8192, help='Batch size for training')
     parser.add_argument('--dropout', type=float, default=0.5, help='Dropout rate')
     parser.add_argument('--weight_decay', type=float, default=0, help='Weight decay (L2 penalty)')
     args = parser.parse_args()
@@ -64,7 +63,7 @@ def main():
                                batch_size=subdivision_batch_size, num_workers=12)
 
     print("Initializing model...")
-    model = GIN(
+    model = GCN(
         in_channels=data.x.size(-1),
         hidden_channels=args.hidden_channels,
         out_channels=dataset.num_classes,
@@ -76,7 +75,7 @@ def main():
 
     # --- 训练设置 ---
     # 定义一个固定的检查点文件名
-    checkpoint_path = Path(f"results/GIN/{args.dataset}best_model.pt")
+    checkpoint_path = Path(f"results/GCN/{args.dataset}/best_model.pt")
 
     # 初始化一个字典来存储训练过程中的指标
     history = {
@@ -93,7 +92,6 @@ def main():
 
     print("Start training...")
     for epoch in range(1, 1 + args.epochs):
-        start_time = time.time()
         train_loss, train_acc = train(model, train_loader, optimizer, device)
         # 记录训练指标
         history['train_loss'].append(train_loss)
@@ -120,18 +118,14 @@ def main():
             torch.save(model.state_dict(), checkpoint_path)
             print(f"    -> New best model saved at epoch {epoch} with Val Acc: {val_acc:.4f}")
 
-        end_time = time.time()
-        epoch_duration = end_time - start_time
-        print(f"    Epoch {epoch} completed in {epoch_duration:.2f} seconds.")
-
     print("\n--- Training Finished ---")
     print(f"Best validation accuracy of {best_val_acc:.4f} achieved at epoch {best_epoch}.")
     
     print("\n--- Loading best model for final evaluation ---")
     model.load_state_dict(torch.load(checkpoint_path))
     
-    _ , final_val_acc = eval(model, val_loader, device)
-    _ , final_test_acc= eval(model, test_loader, device)
+    _, final_val_acc = eval(model, val_loader, device)
+    _, final_test_acc = eval(model, test_loader, device)
 
     print(f'Final Results (from best model at epoch {best_epoch}):')
     print(f'  Validation Accuracy: {final_val_acc:.4f}')
@@ -143,7 +137,7 @@ def main():
         'val_acc': final_val_acc,
         'test_acc': final_test_acc,
     }
-    save_prefix = save_results(history, args, best_epoch_metrics, f"GIN/{args.dataset}")
+    save_prefix = save_results(history, args, best_epoch_metrics, f"GCN/{args.dataset}")
     plot_loss_curve(history, save_prefix)
     plot_accuracy_curve(history, save_prefix)
 

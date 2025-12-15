@@ -1,1 +1,10 @@
 .DS_Store
+dataset/*
+ogb_dataset.tar.gz
+**/__pycache__/
+**/*.pyc
+*.json
+*.pt
+*.png
+*.ipynb
+/results/*
