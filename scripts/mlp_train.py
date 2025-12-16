@@ -8,6 +8,7 @@ import torch
 from torch.utils.data import DataLoader
 import argparse
 from pathlib import Path
+from pdb import set_trace as st
 
 DATA_ROOT = "./dataset"
 
@@ -36,6 +37,8 @@ def main():
     test_idx = split_idx['test']
 
     device = torch.device(args.device)
+
+    st()
 
     if not args.use_full_batch:
         train_set = MLP_Dataset(data, train_idx)

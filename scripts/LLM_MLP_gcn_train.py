@@ -10,11 +10,15 @@ from ogb.nodeproppred import PygNodePropPredDataset
 
 from pathlib import Path
 
-from src.gcn_model import GCN
+# from src.gcn_model import GCN
 from src.train_utils import train, eval
 from src.plot_utils import save_results, plot_loss_curve, plot_accuracy_curve
+from src.LLM_related_model import MLP_Pretrain, GCN
 
-from glob import glob
+from pdb import set_trace as st
+import torch.nn.functional as F
+
+
 
 # --- 训练与评估函数 ---
 
@@ -28,6 +32,8 @@ def main():
     parser.add_argument('--dataset', type=str, default='ogbn-arxiv', help='Dataset name (default: ogbn-arxiv)(Other options: ogbn-products, ogbn-proteins)')
     parser.add_argument('--num_layers', type=int, default=3, help='Number of GNN layers')
     parser.add_argument('--hidden_channels', type=int, default=256, help='Number of hidden channels')
+    parser.add_argument('--pretrain_mlp_num_layers', type=int, default=4, help='Number of mlp pretrained layers')
+    parser.add_argument('--pretrain_mlp_hidden_channels', type=int, default=128, help='the number of hidden channel for pretrained mlp')
     parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
     parser.add_argument('--epochs', type=int, default=50, help='Number of epochs')
     parser.add_argument('--batch_size', type=int, default=8192, help='Batch size for training')
@@ -39,25 +45,36 @@ def main():
     device = f'cuda:{args.device}' if torch.cuda.is_available() else 'cpu'
     device = torch.device(device)
 
+    lm_embeddings = torch.load("results/Qwen3_Embed/Qwen3_embedding_06b.pt").to(device)
+
     # --- 数据加载与预处理 ---
     print("Loading dataset...")
     dataset = PygNodePropPredDataset(name=args.dataset, root=DATA_ROOT, transform=T.ToUndirected())
     data = dataset[0]
-
-    node2vec_embed_path = glob(f"results/Node2Vec_Pretrain/{args.dataset}/node2vec_embeddings_*.pt")
-
-    assert len(node2vec_embed_path) == 1, f"Expected one Node2Vec embedding file, found {len(node2vec_embed_path)}."
-
-    node2vec_embed = torch.load(
-        node2vec_embed_path[0],
-        map_location="cpu"
-    )
-
-    if args.dataset == "ogbn-proteins":
-        data.x = node2vec_embed
-
     split_idx = dataset.get_idx_split()
     train_idx = split_idx['train']
+
+    mlp_checkpoint_path = "results/LLM_embed/MLP/best_model.pt"
+
+    mlp = MLP_Pretrain(
+        in_channels = lm_embeddings.shape[1], 
+        hidden_channels = args.pretrain_mlp_hidden_channels, 
+        out_channels = dataset.num_classes, 
+        num_layers = args.pretrain_mlp_num_layers, 
+        dropout = args.dropout
+        ).to(device)
+    
+    mlp.load_state_dict(torch.load(mlp_checkpoint_path))
+
+    mlp.eval()
+    _, lm_embed_after_mlp = mlp(lm_embeddings)
+
+    lm_embed_after_mlp = lm_embed_after_mlp.detach().to("cpu")
+
+    data.x = F.normalize(data.x, dim=-1)
+    lm_embed_after_mlp = F.normalize(lm_embed_after_mlp, dim=-1)
+
+    data.x = torch.cat([data.x, lm_embed_after_mlp], dim=-1)
 
     print("Setting up data loaders...")
     # 邻域采样是处理大图的关键，[15, 10, 5] 表示为3层GNN，分别采样15, 10, 5个邻居
@@ -79,7 +96,7 @@ def main():
 
     print("Initializing model...")
     model = GCN(
-        in_channels=data.x.size(-1),
+        in_channels=int(data.x.size(-1)/2),
         hidden_channels=args.hidden_channels,
         out_channels=dataset.num_classes,
         num_layers=args.num_layers,
@@ -90,7 +107,13 @@ def main():
 
     # --- 训练设置 ---
     # 定义一个固定的检查点文件名
-    checkpoint_path = Path(f"results/GCN/{args.dataset}/best_model.pt")
+    checkpoint_path = Path(f"results/LM_MLP_GCN/{args.dataset}/best_model.pt")
+
+    if checkpoint_path.exists:
+        model.load_state_dict(torch.load(checkpoint_path))
+        _, final_val_acc = eval(model, val_loader, device)
+        _, final_test_acc = eval(model, test_loader, device)
+        return
 
     # 初始化一个字典来存储训练过程中的指标
     history = {
@@ -152,7 +175,7 @@ def main():
         'val_acc': final_val_acc,
         'test_acc': final_test_acc,
     }
-    save_prefix = save_results(history, args, best_epoch_metrics, f"GCN/{args.dataset}")
+    save_prefix = save_results(history, args, best_epoch_metrics, f"LM_MLP_GCN/{args.dataset}")
     plot_loss_curve(history, save_prefix)
     plot_accuracy_curve(history, save_prefix)
 

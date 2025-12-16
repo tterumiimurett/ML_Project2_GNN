@@ -1,8 +1,8 @@
 import sys, pathlib
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
-from src.node2vec_model import Node2Vec_MLP, Node2Vec_MLP_Dataset, Node2Vec_MLPSample, node2vec_mlp_collate_fn
+from src.node2vec_model import Node2Vec_MLP, Node2Vec_ML_protein
 from src.plot_utils import save_results, plot_loss_curve, plot_accuracy_curve
-from src.train_utils import train_fullbatch, eval_fullbatch
+from src.train_utils import train_fullbatch, eval_fullbatch, train_fullbatch_protein, eval_fullbatc_protein
 from ogb.nodeproppred import PygNodePropPredDataset
 import torch
 from torch.utils.data import DataLoader
@@ -46,16 +46,25 @@ def main():
 
     device = torch.device(args.device)
 
-    x = torch.cat([data.x, node2vec_embed], dim=-1).to(device)
-    y = data.y.squeeze().to(device)
+    x = torch.cat([data.x, node2vec_embed], dim=-1).to(device) if args.dataset != "ogbn-proteins" else node2vec_embed.to(device)
+    y = data.y.squeeze().to(device) if args.dataset != "ogbn-proteins" else data.y.to(device, dtype=float)
 
-    model = Node2Vec_MLP(
-        in_channels=dataset.num_features,
-        hidden_channels=args.hidden_channels,
-        out_channels=dataset.num_classes,
-        num_layers=args.num_layers,
-        dropout=args.dropout
-    ).to(device)
+    if args.dataset != "ogbn-proteins":
+        model = Node2Vec_MLP(
+            in_channels=dataset.num_features,
+            hidden_channels=args.hidden_channels,
+            out_channels=dataset.num_classes,
+            num_layers=args.num_layers,
+            dropout=args.dropout
+        ).to(device)
+    else:
+        model = Node2Vec_ML_protein(
+            in_channels=dataset.num_features,
+            hidden_channels=args.hidden_channels,
+            out_channels=112,
+            num_layers=args.num_layers,
+            dropout=args.dropout
+        ).to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
@@ -74,9 +83,16 @@ def main():
     }
 
     for epoch in range(1, args.epochs + 1):
-        train_loss, train_acc = train_fullbatch(model, x, y, train_idx, optimizer)
-        val_loss, val_acc = eval_fullbatch(model, x, y, valid_idx)
-        test_loss, test_acc = eval_fullbatch(model, x, y, test_idx  )
+
+        if args.dataset != "ogbn-proteins":
+            train_loss, train_acc = train_fullbatch(model, x, y, train_idx, optimizer)
+            val_loss, val_acc = eval_fullbatch(model, x, y, valid_idx)
+            test_loss, test_acc = eval_fullbatch(model, x, y, test_idx)
+        else:
+            train_loss, train_acc = train_fullbatch_protein(model, x, y, train_idx, optimizer)
+            val_loss, val_acc = eval_fullbatc_protein(model, x, y, valid_idx)
+            test_loss, test_acc = eval_fullbatc_protein(model, x, y, test_idx)
+
 
 
         history['train_loss'].append(train_loss)
@@ -105,8 +121,12 @@ def main():
     print("\n--- Loading best model for final evaluation ---")
     model.load_state_dict(torch.load(checkpoint_path))
     
-    _, final_val_acc = eval_fullbatch(model, x, y, valid_idx)
-    _, final_test_acc = eval_fullbatch(model, x, y, test_idx)
+    if args.dataset != "ogbn-proteins":
+        _, final_val_acc = eval_fullbatch(model, x, y, valid_idx)
+        _, final_test_acc = eval_fullbatch(model, x, y, test_idx)
+    else:
+        _, final_val_acc = eval_fullbatc_protein(model, x, y, valid_idx)
+        _, final_test_acc = eval_fullbatc_protein(model, x, y, test_idx)
 
     print(f'Final Results (from best model at epoch {best_epoch}):')
     print(f'  Validation Accuracy: {final_val_acc:.4f}')

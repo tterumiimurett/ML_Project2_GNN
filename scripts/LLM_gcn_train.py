@@ -14,7 +14,11 @@ from src.gcn_model import GCN
 from src.train_utils import train, eval
 from src.plot_utils import save_results, plot_loss_curve, plot_accuracy_curve
 
+from pdb import set_trace as st
+import torch.nn.functional as F
 from glob import glob
+
+
 
 # --- 训练与评估函数 ---
 
@@ -39,25 +43,19 @@ def main():
     device = f'cuda:{args.device}' if torch.cuda.is_available() else 'cpu'
     device = torch.device(device)
 
+    lm_embeddings = torch.load("results/Qwen3_Embed/Qwen3_embedding_06b.pt").to("cpu")
+
     # --- 数据加载与预处理 ---
     print("Loading dataset...")
     dataset = PygNodePropPredDataset(name=args.dataset, root=DATA_ROOT, transform=T.ToUndirected())
     data = dataset[0]
-
-    node2vec_embed_path = glob(f"results/Node2Vec_Pretrain/{args.dataset}/node2vec_embeddings_*.pt")
-
-    assert len(node2vec_embed_path) == 1, f"Expected one Node2Vec embedding file, found {len(node2vec_embed_path)}."
-
-    node2vec_embed = torch.load(
-        node2vec_embed_path[0],
-        map_location="cpu"
-    )
-
-    if args.dataset == "ogbn-proteins":
-        data.x = node2vec_embed
-
     split_idx = dataset.get_idx_split()
     train_idx = split_idx['train']
+
+    data.x = F.normalize(data.x, dim=-1)
+    lm_embeddings = F.normalize(lm_embeddings, dim=-1)
+
+    data.x = torch.cat([data.x, lm_embeddings], dim=1)
 
     print("Setting up data loaders...")
     # 邻域采样是处理大图的关键，[15, 10, 5] 表示为3层GNN，分别采样15, 10, 5个邻居
@@ -90,7 +88,7 @@ def main():
 
     # --- 训练设置 ---
     # 定义一个固定的检查点文件名
-    checkpoint_path = Path(f"results/GCN/{args.dataset}/best_model.pt")
+    checkpoint_path = Path(f"results/LM_GCN/{args.dataset}/best_model.pt")
 
     # 初始化一个字典来存储训练过程中的指标
     history = {
@@ -152,7 +150,7 @@ def main():
         'val_acc': final_val_acc,
         'test_acc': final_test_acc,
     }
-    save_prefix = save_results(history, args, best_epoch_metrics, f"GCN/{args.dataset}")
+    save_prefix = save_results(history, args, best_epoch_metrics, f"LM_GCN/{args.dataset}")
     plot_loss_curve(history, save_prefix)
     plot_accuracy_curve(history, save_prefix)
 

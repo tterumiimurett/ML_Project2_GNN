@@ -78,3 +78,32 @@ class Node2Vec_MLP(torch.nn.Module):
                 x = F.dropout(x, p=self.dropout, training=self.training)
         
         return F.log_softmax(x, dim=-1)
+    
+
+class Node2Vec_ML_protein(torch.nn.Module):
+    def __init__(self, in_channels: int, hidden_channels: int, out_channels: 112, num_layers: int, dropout: float):
+        super().__init__()
+
+        self.layers = torch.nn.ModuleList()
+        self.dropout = dropout
+
+        in_channels = in_channels + 128 # 增加 Node2Vec 嵌入维度
+
+        # 输入层
+        self.layers.append(Linear(in_channels, hidden_channels))
+        
+        # 隐藏层
+        for _ in range(num_layers - 2):
+            self.layers.append(Linear(hidden_channels, hidden_channels))
+        
+        # 输出层
+        self.layers.append(Linear(hidden_channels, out_channels))
+
+    def forward(self, x):
+        for i, layer in enumerate(self.layers):
+            x = layer(x)
+            if i < len(self.layers) - 1:
+                x = F.relu(x)
+                x = F.dropout(x, p=self.dropout, training=self.training)
+        
+        return x
