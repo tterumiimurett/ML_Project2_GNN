@@ -9,7 +9,7 @@ def save_results(history, args, best_epoch_metrics, exp_name):
     """
     # 使用时间戳创建唯一的文件名
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = Path(f"results/{exp_name}/gin_results_{timestamp}.json")
+    filename = Path(f"results/{exp_name}/results_{timestamp}.json")
 
     filename.parent.mkdir(parents=True, exist_ok=True)
     

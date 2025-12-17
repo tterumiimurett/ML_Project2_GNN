@@ -1,11 +1,14 @@
 import sys, pathlib
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
-from src.mlp_model import MLP_Baseline, MLP_Dataset, mlp_collate_fn, MLPSample
+from src.mlp_model import MLP_Baseline
 from src.plot_utils import save_results, plot_loss_curve, plot_accuracy_curve
-from src.train_utils import train, eval, train_fullbatch, eval_fullbatch
+from src.train_utils import (
+    train, eval, train_fullbatch, eval_fullbatch, 
+    train_multilabel, eval_multilabel, train_fullbatch_multilabel, eval_fullbatch_multilabel,
+    GPUBatchIterator
+)
 from ogb.nodeproppred import PygNodePropPredDataset
 import torch
-from torch.utils.data import DataLoader
 import argparse
 from pathlib import Path
 from pdb import set_trace as st
@@ -27,37 +30,46 @@ def main():
     
     args = parser.parse_args()
 
+    device = torch.device(args.device)
+
     # Load dataset
     dataset = PygNodePropPredDataset(name=args.dataset, root=DATA_ROOT)
     data = dataset[0]
+    
+    # Move data to GPU
+    data = data.to(device)
+    x = data.x
+    y = data.y.squeeze()
 
     split_idx = dataset.get_idx_split()
-    train_idx = split_idx['train']
-    valid_idx = split_idx['valid']
-    test_idx = split_idx['test']
+    train_idx = split_idx['train'].to(device)
+    valid_idx = split_idx['valid'].to(device)
+    test_idx = split_idx['test'].to(device)
 
-    device = torch.device(args.device)
-
-    st()
+    # Select training/eval functions based on dataset
+    if args.dataset == 'ogbn-proteins':
+        train_fn = train_multilabel
+        eval_fn = eval_multilabel
+        train_fullbatch_fn = train_fullbatch_multilabel
+        eval_fullbatch_fn = eval_fullbatch_multilabel
+    else:
+        train_fn = train
+        eval_fn = eval
+        train_fullbatch_fn = train_fullbatch
+        eval_fullbatch_fn = eval_fullbatch
 
     if not args.use_full_batch:
-        train_set = MLP_Dataset(data, train_idx)
-        valid_set = MLP_Dataset(data, valid_idx)
-        test_set = MLP_Dataset(data, test_idx)
-
-        train_loader = DataLoader(train_set, batch_size=args.batch_size, collate_fn=mlp_collate_fn, shuffle=True, num_workers=4)
-        valid_loader = DataLoader(valid_set, batch_size=args.batch_size, collate_fn=mlp_collate_fn, shuffle=False, num_workers=4)
-        test_loader = DataLoader(test_set, batch_size=args.batch_size, collate_fn=mlp_collate_fn, shuffle=False, num_workers=4)
-    else:
-        x = data.x.to(device)
-        y = data.y.squeeze().to(device)
+        train_loader = GPUBatchIterator(x, y, train_idx, args.batch_size, shuffle=True)
+        valid_loader = GPUBatchIterator(x, y, valid_idx, args.batch_size, shuffle=False)
+        test_loader = GPUBatchIterator(x, y, test_idx, args.batch_size, shuffle=False)
 
     model = MLP_Baseline(
         in_channels=dataset.num_features,
         hidden_channels=args.hidden_channels,
         out_channels=dataset.num_classes,
         num_layers=args.num_layers,
-        dropout=args.dropout
+        dropout=args.dropout,
+        is_multilabel=(args.dataset == 'ogbn-proteins')
     ).to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
@@ -78,13 +90,13 @@ def main():
 
     for epoch in range(1, args.epochs + 1):
         if not args.use_full_batch:
-            train_loss, train_acc = train(model, train_loader, optimizer, device)
-            val_loss, val_acc = eval(model, valid_loader, device)
-            test_loss, test_acc = eval(model, test_loader, device)
+            train_loss, train_acc = train_fn(model, train_loader, optimizer, device)
+            val_loss, val_acc = eval_fn(model, valid_loader, device)
+            test_loss, test_acc = eval_fn(model, test_loader, device)
         else:
-            train_loss, train_acc = train_fullbatch(model, x, y, train_idx, optimizer)
-            val_loss, val_acc = eval_fullbatch(model, x, y, valid_idx)
-            test_loss, test_acc = eval_fullbatch(model, x, y, test_idx)
+            train_loss, train_acc = train_fullbatch_fn(model, x, y, train_idx, optimizer)
+            val_loss, val_acc = eval_fullbatch_fn(model, x, y, valid_idx)
+            test_loss, test_acc = eval_fullbatch_fn(model, x, y, test_idx)
 
         history['train_loss'].append(train_loss)
         history['train_acc'].append(train_acc)
@@ -113,11 +125,11 @@ def main():
     model.load_state_dict(torch.load(checkpoint_path))
     
     if not args.use_full_batch:
-        _, final_val_acc = eval(model, valid_loader, device)
-        _, final_test_acc = eval(model, test_loader, device)
+        _, final_val_acc = eval_fn(model, valid_loader, device)
+        _, final_test_acc = eval_fn(model, test_loader, device)
     else:
-        _, final_val_acc = eval_fullbatch(model, x, y, valid_idx)
-        _, final_test_acc = eval_fullbatch(model, x, y, test_idx)
+        _, final_val_acc = eval_fullbatch_fn(model, x, y, valid_idx)
+        _, final_test_acc = eval_fullbatch_fn(model, x, y, test_idx)
 
     print(f'Final Results (from best model at epoch {best_epoch}):')
     print(f'  Validation Accuracy: {final_val_acc:.4f}')

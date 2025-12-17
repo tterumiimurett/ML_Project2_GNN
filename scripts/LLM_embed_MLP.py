@@ -15,7 +15,8 @@ from sentence_transformers import SentenceTransformer
 
 
 from src.gcn_model import GCN
-from src.LLM_related_model import train, eval, MLP_Pretrain, LLM_Embed_Dataset, LLM_Enbed_collate_fn, GPUBatchIterator
+from src.LLM_related_model import train, eval, MLP_Pretrain, LLM_Embed_Dataset, LLM_Enbed_collate_fn
+from src.train_utils import GPUBatchIterator
 from src.plot_utils import save_results, plot_loss_curve, plot_accuracy_curve
 from pdb import set_trace as st
 from LLM.utils import get_ogbn_arxiv_data
@@ -78,9 +79,9 @@ def main():
     valid_idx = split_idx['valid']
     test_idx = split_idx['test']
 
-    train_loader = GPUBatchIterator(data, lm_embeddings, train_idx, args.batch_size, shuffle = True)
-    valid_loader = GPUBatchIterator(data, lm_embeddings, valid_idx, args.batch_size, shuffle = False)
-    test_loader = GPUBatchIterator(data, lm_embeddings, test_idx, args.batch_size, shuffle = False)
+    train_loader = GPUBatchIterator(data.x, data.y.squeeze(), train_idx, args.batch_size, shuffle=True, extra_x=lm_embeddings)
+    valid_loader = GPUBatchIterator(data.x, data.y.squeeze(), valid_idx, args.batch_size, shuffle=False, extra_x=lm_embeddings)
+    test_loader = GPUBatchIterator(data.x, data.y.squeeze(), test_idx, args.batch_size, shuffle=False, extra_x=lm_embeddings)
 
     # train_set = LLM_Embed_Dataset(lm_embeddings, data.y, train_idx)
     # valid_set = LLM_Embed_Dataset(lm_embeddings, data.y, valid_idx)

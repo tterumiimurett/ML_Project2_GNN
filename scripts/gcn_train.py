@@ -10,8 +10,8 @@ from ogb.nodeproppred import PygNodePropPredDataset
 
 from pathlib import Path
 
-from src.gcn_model import GCN
-from src.train_utils import train, eval
+from src.gcn_model import GCN, GCN_Protein
+from src.train_utils import train, eval, train_multilabel, eval_multilabel
 from src.plot_utils import save_results, plot_loss_curve, plot_accuracy_curve
 
 from glob import glob
@@ -77,8 +77,17 @@ def main():
     test_loader = NeighborLoader(data, input_nodes=split_idx['test'], num_neighbors=[15, 10, 5][:args.num_layers],
                                batch_size=subdivision_batch_size, num_workers=12)
 
+    if args.dataset == 'ogbn-proteins':
+        model_cls = GCN_Protein
+        train_fn = train_multilabel
+        eval_fn = eval_multilabel
+    else:
+        model_cls = GCN
+        train_fn = train
+        eval_fn = eval
+
     print("Initializing model...")
-    model = GCN(
+    model = model_cls(
         in_channels=data.x.size(-1),
         hidden_channels=args.hidden_channels,
         out_channels=dataset.num_classes,
@@ -107,14 +116,14 @@ def main():
 
     print("Start training...")
     for epoch in range(1, 1 + args.epochs):
-        train_loss, train_acc = train(model, train_loader, optimizer, device)
+        train_loss, train_acc = train_fn(model, train_loader, optimizer, device)
         # 记录训练指标
         history['train_loss'].append(train_loss)
         history['train_acc'].append(train_acc)
         
         # 每个epoch都进行评估
-        val_loss, val_acc = eval(model, val_loader, device)
-        test_loss, test_acc = eval(model, test_loader, device)
+        val_loss, val_acc = eval_fn(model, val_loader, device)
+        test_loss, test_acc = eval_fn(model, test_loader, device)
         
         # 记录评估指标
         history['val_loss'].append(val_loss)
@@ -139,8 +148,8 @@ def main():
     print("\n--- Loading best model for final evaluation ---")
     model.load_state_dict(torch.load(checkpoint_path))
     
-    _, final_val_acc = eval(model, val_loader, device)
-    _, final_test_acc = eval(model, test_loader, device)
+    _, final_val_acc = eval_fn(model, val_loader, device)
+    _, final_test_acc = eval_fn(model, test_loader, device)
 
     print(f'Final Results (from best model at epoch {best_epoch}):')
     print(f'  Validation Accuracy: {final_val_acc:.4f}')

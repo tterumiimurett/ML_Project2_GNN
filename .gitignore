@@ -8,3 +8,4 @@ ogb_dataset.tar.gz
 *.png
 *.ipynb
 /results/*
+tasks/*

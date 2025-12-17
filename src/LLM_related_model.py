@@ -9,38 +9,7 @@ from pdb import set_trace as st
 
 import torch
 from typing import Iterator, Tuple
-
-class GPUBatchIterator:
-    def __init__(
-        self,
-        data, 
-        lm_embeddings: torch.Tensor, 
-        indices: torch.Tensor,    # (M,)   on GPU or CPU
-        batch_size: int,
-        shuffle: bool = True,
-    ):
-        assert data.x.is_cuda and data.y.is_cuda and lm_embeddings.is_cuda, "x and y and lm_embedding must already be on GPU"
-        self.x = data.x
-        self.lm_embeddings = lm_embeddings
-        self.y = data.y.squeeze()
-        self.indices = indices.to(data.x.device)
-        self.batch_size = batch_size
-        self.shuffle = shuffle
-        self.num_samples = indices.size(0)
-
-    def __iter__(self) -> Iterator[Tuple[torch.Tensor, torch.Tensor]]:
-        if self.shuffle:
-            perm = torch.randperm(self.num_samples, device=self.indices.device)
-            idx = self.indices[perm]
-        else:
-            idx = self.indices
-
-        for start in range(0, self.num_samples, self.batch_size):
-            batch_idx = idx[start : start + self.batch_size]
-            yield self.x[batch_idx], self.lm_embeddings[batch_idx], self.y[batch_idx]
-
-    def __len__(self):
-        return (self.num_samples + self.batch_size - 1) // self.batch_size
+from src.train_utils import GPUBatchIterator
 
 class MLP_Pretrain(torch.nn.Module): 
     def __init__(self, in_channels, hidden_channels, out_channels, num_layers, dropout):

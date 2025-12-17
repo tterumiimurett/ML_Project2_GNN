@@ -1,8 +1,8 @@
 import sys, pathlib
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
-from src.node2vec_model import Node2Vec_MLP, Node2Vec_ML_protein
+from src.mlp_model import MLP_Baseline
 from src.plot_utils import save_results, plot_loss_curve, plot_accuracy_curve
-from src.train_utils import train_fullbatch, eval_fullbatch, train_fullbatch_protein, eval_fullbatc_protein
+from src.train_utils import train_fullbatch, eval_fullbatch, train_fullbatch_multilabel, eval_fullbatch_multilabel
 from ogb.nodeproppred import PygNodePropPredDataset
 import torch
 from torch.utils.data import DataLoader
@@ -49,22 +49,21 @@ def main():
     x = torch.cat([data.x, node2vec_embed], dim=-1).to(device) if args.dataset != "ogbn-proteins" else node2vec_embed.to(device)
     y = data.y.squeeze().to(device) if args.dataset != "ogbn-proteins" else data.y.to(device, dtype=float)
 
-    if args.dataset != "ogbn-proteins":
-        model = Node2Vec_MLP(
-            in_channels=dataset.num_features,
-            hidden_channels=args.hidden_channels,
-            out_channels=dataset.num_classes,
-            num_layers=args.num_layers,
-            dropout=args.dropout
-        ).to(device)
+    if args.dataset == 'ogbn-proteins':
+        train_fullbatch_fn = train_fullbatch_multilabel
+        eval_fullbatch_fn = eval_fullbatch_multilabel
     else:
-        model = Node2Vec_ML_protein(
-            in_channels=dataset.num_features,
-            hidden_channels=args.hidden_channels,
-            out_channels=112,
-            num_layers=args.num_layers,
-            dropout=args.dropout
-        ).to(device)
+        train_fullbatch_fn = train_fullbatch
+        eval_fullbatch_fn = eval_fullbatch
+
+    model = MLP_Baseline(
+        in_channels=x.shape[1],
+        hidden_channels=args.hidden_channels,
+        out_channels=dataset.num_classes,
+        num_layers=args.num_layers,
+        dropout=args.dropout,
+        is_multilabel=(args.dataset == 'ogbn-proteins')
+    ).to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
@@ -84,16 +83,9 @@ def main():
 
     for epoch in range(1, args.epochs + 1):
 
-        if args.dataset != "ogbn-proteins":
-            train_loss, train_acc = train_fullbatch(model, x, y, train_idx, optimizer)
-            val_loss, val_acc = eval_fullbatch(model, x, y, valid_idx)
-            test_loss, test_acc = eval_fullbatch(model, x, y, test_idx)
-        else:
-            train_loss, train_acc = train_fullbatch_protein(model, x, y, train_idx, optimizer)
-            val_loss, val_acc = eval_fullbatc_protein(model, x, y, valid_idx)
-            test_loss, test_acc = eval_fullbatc_protein(model, x, y, test_idx)
-
-
+        train_loss, train_acc = train_fullbatch_fn(model, x, y, train_idx, optimizer)
+        val_loss, val_acc = eval_fullbatch_fn(model, x, y, valid_idx)
+        test_loss, test_acc = eval_fullbatch_fn(model, x, y, test_idx)
 
         history['train_loss'].append(train_loss)
         history['train_acc'].append(train_acc)
@@ -121,12 +113,8 @@ def main():
     print("\n--- Loading best model for final evaluation ---")
     model.load_state_dict(torch.load(checkpoint_path))
     
-    if args.dataset != "ogbn-proteins":
-        _, final_val_acc = eval_fullbatch(model, x, y, valid_idx)
-        _, final_test_acc = eval_fullbatch(model, x, y, test_idx)
-    else:
-        _, final_val_acc = eval_fullbatc_protein(model, x, y, valid_idx)
-        _, final_test_acc = eval_fullbatc_protein(model, x, y, test_idx)
+    _, final_val_acc = eval_fullbatch_fn(model, x, y, valid_idx)
+    _, final_test_acc = eval_fullbatch_fn(model, x, y, test_idx)
 
     print(f'Final Results (from best model at epoch {best_epoch}):')
     print(f'  Validation Accuracy: {final_val_acc:.4f}')
